@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "perfagent": {
+      "command": "python",
+      "args": ["-m", "perfagent.mcp_server"]
+    }
+  }
+}

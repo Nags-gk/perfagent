@@ -1,0 +1,56 @@
+name: eval
+# Runs the LLM agent on the full task suite and publishes the results.
+# Needs a repository secret GEMINI_API_KEY (or GROQ_API_KEY for provider=groq).
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "gemini or groq"
+        default: gemini
+      model:
+        description: "model id (blank = auto-pick a Flash model)"
+        default: ""
+      only:
+        description: "substring filter on task ids (blank = all 25)"
+        default: ""
+      pause:
+        description: "seconds between tasks (free-tier rate limits)"
+        default: "6"
+permissions:
+  contents: write
+concurrency: eval
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e .
+      - name: Run agent on the task suite
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          PROVIDER: ${{ inputs.provider }}
+          MODEL: ${{ inputs.model }}
+          ONLY: ${{ inputs.only }}
+          PAUSE: ${{ inputs.pause }}
+        run: |
+          args=(--agents "$PROVIDER" --pause "$PAUSE")
+          [ -n "$MODEL" ] && args+=(--model "$MODEL")
+          [ -n "$ONLY" ] && args+=(--only "$ONLY")
+          python -m perfagent.eval "${args[@]}" | tee eval.log
+      - name: Commit results
+        run: |
+          git config user.name "perfagent-eval"
+          git config user.email "actions@users.noreply.github.com"
+          git add site/data/results.json site/data/traces
+          git diff --cached --quiet || git commit -m "eval: ${{ inputs.provider }} results" && git push
+      - run: python scripts/build_site.py
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          exclude_assets: "_pyodide"
