@@ -167,3 +167,35 @@ def test_mcp_server_over_stdio():
 
     names, fit = asyncio.run(go())
     assert {"check_fit", "evaluate_layout"} <= names and fit["fits"] is True
+
+
+def test_eval_stops_on_daily_quota_saves_partial_and_resumes(tmp_path, monkeypatch):
+    from perfagent import eval as ev
+    from perfagent.llm import QuotaExhausted
+
+    class FakeProvider:
+        calls = 0
+
+        def __init__(self, kind, model):
+            self.name, self.requests, self.retries = f"{kind}:fake-flash", 0, 0
+
+        def chat(self, messages, tools):
+            FakeProvider.calls += 1
+            if FakeProvider.calls > 3:
+                raise QuotaExhausted("daily quota exhausted")
+            task_text = messages[1]["content"]
+            t = next(t for t in SUITE.values() if t.prompt == task_text)
+            args = {"answer": dict(t.truth), "rationale": "fake"}
+            raw = {"role": "assistant", "content": "", "tool_calls": [{"id": "c", "type": "function",
+                   "function": {"name": "submit_answer", "arguments": json.dumps(args)}}]}
+            return Reply(None, [{"id": "c", "name": "submit_answer", "args": args}], {"in": 1, "out": 1}, raw)
+
+    monkeypatch.setattr(ev, "OpenAICompatLLM", FakeProvider)
+    monkeypatch.setattr(ev, "DATA", tmp_path)
+    ev.main(["--agents", "gemini", "--only", "sizing"])
+    saved = json.loads((tmp_path / "results.json").read_text())["rows"]
+    assert len(saved) == 3 and all(r["success"] for r in saved)  # 4th task hit the quota and was not scored
+    FakeProvider.calls = 0
+    ev.main(["--agents", "gemini", "--only", "sizing"])  # resume: only the missing task runs
+    saved = json.loads((tmp_path / "results.json").read_text())["rows"]
+    assert len(saved) == 4 and FakeProvider.calls == 1

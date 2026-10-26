@@ -22,6 +22,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, StateGraph
 from pydantic import ValidationError, create_model
 
+from .llm import QuotaExhausted
 from .tasks import Task
 from .tools import ToolBox, ToolError, openai_tools
 from .tracing import Tracer
@@ -229,6 +230,8 @@ class Agent:
             try:
                 final = self.graph.invoke(init, {"recursion_limit": 4 * self.max_turns + 20})
                 error = None
+            except QuotaExhausted:
+                raise  # the caller stops the whole run; this task is not scored
             except Exception as e:  # noqa: BLE001 - provider failure: record it, keep the eval running
                 final, error = {"answer": None, "status": "error"}, f"{type(e).__name__}: {e}"
         grade = self.task.grade(final.get("answer"))

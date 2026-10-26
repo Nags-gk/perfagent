@@ -28,6 +28,13 @@ PREFERRED = {
 }
 
 
+class QuotaExhausted(RuntimeError):
+    """The provider's daily (not per-minute) quota is spent: retrying today is pointless."""
+
+
+_DAILY = re.compile(r"per ?day|PerDay|daily", re.IGNORECASE)
+
+
 @dataclass
 class Reply:
     content: str | None
@@ -60,6 +67,8 @@ class OpenAICompatLLM:
         self.model = model or _pick_model([m.id for m in self.client.models.list().data], provider)
         self.temperature = temperature
         self.max_retries = max_retries
+        self.requests = 0
+        self.retries = 0
 
     @property
     def name(self) -> str:
@@ -71,6 +80,7 @@ class OpenAICompatLLM:
         delay = 5.0
         for attempt in range(self.max_retries):
             try:
+                self.requests += 1
                 r = self.client.chat.completions.create(model=self.model, messages=messages, tools=tools,
                                                         temperature=self.temperature)
                 break
@@ -80,6 +90,9 @@ class OpenAICompatLLM:
                 if e.status_code not in (429, 500, 502, 503, 504):
                     raise
                 err = e
+            if _DAILY.search(str(err)):
+                raise QuotaExhausted(f"{self.name}: daily quota exhausted ({str(err)[:300]})") from err
+            self.retries += 1
             m = re.search(r"retry in ([\d.]+)s", str(err), re.IGNORECASE)
             time.sleep(float(m.group(1)) + 1 if m else delay)
             delay = min(delay * 2, 60)
