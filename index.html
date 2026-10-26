@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PerfAgent</title>
+<meta name="description" content="An LLM agent that automates LLM-inference performance modeling: simulation, bottleneck analysis and design space exploration, benchmarked against exhaustive ground truth.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-inner">
+    <div>
+      <h1>PerfAgent</h1>
+      <p class="lede">An LLM agent that automates performance-modeling work: it drives the <a href="https://nags-gk.github.io/infersim/">InferSim</a> simulator through tools to find bottlenecks, size deployments and search the design space. Scored against exhaustive-search ground truth, next to Optuna and random search under the same simulation budget.</p>
+    </div>
+    <div class="top-meta">
+      <span id="engine" class="pill pill-wait">Simulator loading</span>
+      <a class="link" href="https://github.com/Nags-gk/perfagent">Source on GitHub</a>
+    </div>
+  </div>
+  <nav class="wrap tabs" id="nav">
+    <a href="#results">Results</a>
+    <a href="#tasks">Tasks</a>
+    <a href="#trace">Trace viewer</a>
+    <a href="#live">Run it live</a>
+    <a href="#how">How it works</a>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section id="results">
+    <h2>Results</h2>
+    <p class="hint" id="results-hint"></p>
+    <div class="panel"><div class="scroll"><table class="tbl" id="board"></table></div></div>
+    <div class="split">
+      <div class="panel"><div class="panel-head"><h3>Design-space tasks: fraction of the optimum</h3><span class="legend" id="dse-legend"></span></div><div id="dse-chart" class="chart"></div></div>
+      <div class="panel"><div class="panel-head"><h3>Success rate by task type</h3></div><div id="kind-chart"></div></div>
+    </div>
+  </section>
+
+  <section id="tasks">
+    <h2>Tasks</h2>
+    <p class="hint">25 questions a performance-modeling team answers daily. Ground truth comes from brute force over the same simulator, so the benchmark measures search and reasoning. Click a cell to open its trace.</p>
+    <div class="panel"><div class="scroll"><table class="tbl" id="task-table"></table></div></div>
+  </section>
+
+  <section id="trace">
+    <h2>Trace viewer</h2>
+    <div class="controls inline">
+      <label>Agent <select id="tr-agent"></select></label>
+      <label>Task <select id="tr-task"></select></label>
+    </div>
+    <div class="kpis" id="tr-kpis"></div>
+    <div class="panel"><div id="tr-events" class="events"></div></div>
+  </section>
+
+  <section id="live">
+    <h2>Run it live</h2>
+    <p class="hint">The agent loop runs in this page: Gemini decides, and the simulator runs locally in your browser through Pyodide. Bring a Gemini API key (free at aistudio.google.com). The key stays in this tab's memory and is sent only to Google's API; it is not stored or logged.</p>
+    <form id="live-form" class="controls inline" autocomplete="off">
+      <label class="wide">Gemini API key <input type="password" name="key" placeholder="paste key" required></label>
+      <label class="wide">Task <select name="task"></select></label>
+      <label>Budget <input type="number" name="budget" min="5" max="60" value="30"></label>
+      <button type="submit" id="live-run" disabled>Run agent</button>
+    </form>
+    <p class="status" id="live-status"></p>
+    <div class="kpis" id="live-kpis"></div>
+    <div class="panel" id="live-panel" hidden><div id="live-events" class="events"></div></div>
+  </section>
+
+  <section id="how">
+    <h2>How it works</h2>
+    <div class="arch" id="arch"></div>
+    <div class="prose">
+      <p><strong>Agent.</strong> A LangGraph state machine: model, tools, verify. Gemini (or Groq, or a local Ollama model, all through the OpenAI-compatible API) calls five simulation tools. Arguments are validated by the tools and errors go back to the model as results. The answer must match a typed schema per task (Pydantic). A verifier re-simulates design-space answers and returns a failure once if the layout does not fit or misses the SLA. Turns and simulations are capped.</p>
+      <p><strong>Budget.</strong> <code>simulate_step</code>, <code>roofline_ops</code> and <code>evaluate_layout</code> each cost one simulation; <code>check_fit</code> and <code>list_catalog</code> are free; repeats are cached. Design-space spaces hold 120 to 480 layouts and every searcher gets 30 simulations.</p>
+      <p><strong>Baselines.</strong> Optuna TPE and random search over the same discrete space and budget (5 seeds each), and a hand-written rule-based strategy that reads the task parameters directly.</p>
+      <p><strong>Observability.</strong> Every model call, tool call and verification is an OpenTelemetry span; spans and a readable event log are saved per run and replayed above.</p>
+      <p><strong>MCP.</strong> The same tools are an MCP server, so coding agents can use them: <code>claude mcp add perfagent -- python -m perfagent.mcp_server</code>.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap foot">
+  <span>PerfAgent. MIT licensed. All latencies are modeled by InferSim.</span>
+  <a class="link" href="https://github.com/Nags-gk/perfagent">github.com/Nags-gk/perfagent</a>
+</footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>
