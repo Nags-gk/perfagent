@@ -40,6 +40,8 @@ spending simulations.
 device but lower tokens/s per user; more tensor parallelism raises tokens/s per user but costs devices; \
 lower precision halves weight traffic. Search near the SLA boundary.
 - For crossover questions, binary-search the batch size.
+- Each model turn is expensive: when several tool calls do not depend on each other (for example check_fit \
+on several layouts, or evaluate_layout on several candidates), make them all in the same turn.
 - Numbers come from the tools, never from memory.
 
 When you are done, call submit_answer with `answer` exactly in this JSON shape (same keys and types):

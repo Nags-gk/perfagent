@@ -231,3 +231,23 @@ def test_model_probe_skips_models_without_quota(monkeypatch):
     m = L.OpenAICompatLLM("gemini")
     assert m.model == "gemini-2.5-flash" and set(m.skipped) == {"gemini-3.8-flash", "gemini-3.5-flash"}
     assert L._rank_models(["gemini-3.8-flash-lite", "gemini-2.5-flash"], "gemini") == ["gemini-2.5-flash", "gemini-3.8-flash-lite"]
+
+
+def test_gemini_thought_signature_is_echoed_back():
+    """Gemini 3 rejects follow-up requests (HTTP 400) unless each tool call's thought signature is returned."""
+    from openai.types.chat import ChatCompletion
+
+    from perfagent.llm import OpenAICompatLLM
+
+    resp = ChatCompletion.model_validate({
+        "id": "x", "object": "chat.completion", "created": 0, "model": "m", "choices": [{
+            "index": 0, "finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [{
+                "id": "c1", "type": "function", "function": {"name": "check_fit", "arguments": '{"model":"llama-3.1-8b","hw":"h100"}'},
+                "extra_content": {"google": {"thought_signature": "SIG"}}}]}}],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}})
+    o = OpenAICompatLLM.__new__(OpenAICompatLLM)
+    o.client = type("X", (), {"chat": type("Y", (), {"completions": type("Z", (), {"create": lambda s, **k: resp})()})()})()
+    o.model, o.provider, o.temperature, o.max_retries, o.requests, o.retries = "m", "gemini", 0, 1, 0, 0
+    r = o.chat([], [])
+    assert r.raw_message["tool_calls"][0]["extra_content"]["google"]["thought_signature"] == "SIG"
+    assert r.tool_calls == [{"id": "c1", "name": "check_fit", "args": {"model": "llama-3.1-8b", "hw": "h100"}}]

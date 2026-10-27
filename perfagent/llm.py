@@ -128,7 +128,8 @@ class OpenAICompatLLM:
                 err = e
             except APIStatusError as e:
                 if e.status_code not in (429, 500, 502, 503, 504):
-                    raise
+                    body = e.body if e.body is not None else getattr(e.response, "text", "")
+                    raise RuntimeError(f"{self.name} HTTP {e.status_code}: {str(body)[:600]}") from e
                 err = e
             if _DAILY.search(str(err)):
                 raise QuotaExhausted(f"{self.name}: daily quota exhausted ({str(err)[:300]})") from err
@@ -139,18 +140,22 @@ class OpenAICompatLLM:
         else:
             raise RuntimeError(f"{self.name} kept failing: {str(err)[:400]}")
         msg = r.choices[0].message
+        # Echo the assistant message back exactly as received: Gemini 3 attaches a thought signature
+        # to each tool call (extra_content.google.thought_signature) and rejects a follow-up request
+        # with HTTP 400 if it is missing.
+        raw = msg.model_dump(exclude_none=True)
+        raw["role"] = "assistant"
+        raw.setdefault("content", "")
         calls = []
-        for tc in msg.tool_calls or []:
+        for i, tc in enumerate(msg.tool_calls or []):
             try:
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {"_unparseable": tc.function.arguments}
-            calls.append({"id": tc.id or f"call_{uuid.uuid4().hex[:8]}", "name": tc.function.name, "args": args})
+            cid = tc.id or f"call_{uuid.uuid4().hex[:8]}"
+            raw["tool_calls"][i]["id"] = cid
+            calls.append({"id": cid, "name": tc.function.name, "args": args})
         usage = {"in": getattr(r.usage, "prompt_tokens", 0) or 0, "out": getattr(r.usage, "completion_tokens", 0) or 0}
-        raw = {"role": "assistant", "content": msg.content or ""}
-        if calls:
-            raw["tool_calls"] = [{"id": c["id"], "type": "function",
-                                  "function": {"name": c["name"], "arguments": json.dumps(c["args"])}} for c in calls]
         return Reply(msg.content, calls, usage, raw)
 
 
