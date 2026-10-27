@@ -44,7 +44,7 @@ jobs:
           [ -n "$MODEL" ] && args+=(--model "$MODEL")
           [ -n "$ONLY" ] && args+=(--only "$ONLY")
           python -m perfagent.eval "${args[@]}" | tee eval.log
-      - name: Commit results (also after a timeout or quota stop: partial runs resume next time)
+      - name: Commit results, including partial runs after a timeout or quota stop
         if: always()
         run: |
           git config user.name "perfagent-eval"
