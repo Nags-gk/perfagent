@@ -199,3 +199,35 @@ def test_eval_stops_on_daily_quota_saves_partial_and_resumes(tmp_path, monkeypat
     ev.main(["--agents", "gemini", "--only", "sizing"])  # resume: only the missing task runs
     saved = json.loads((tmp_path / "results.json").read_text())["rows"]
     assert len(saved) == 4 and FakeProvider.calls == 1
+
+
+def test_model_probe_skips_models_without_quota(monkeypatch):
+    import httpx
+    from openai import APIStatusError
+
+    from perfagent import llm as L
+
+    def err(code, text):
+        req = httpx.Request("POST", "https://x")
+        return APIStatusError(text, response=httpx.Response(code, request=req), body=None)
+
+    class Completions:
+        def create(self, model, **kw):
+            if model == "gemini-3.8-flash":
+                raise err(429, "Quota exceeded for metric free_tier_requests, limit: 0, model: gemini-3.8-flash")
+            if model == "gemini-3.5-flash":
+                raise err(503, "The model is overloaded")
+            return object()
+
+    class Client:
+        def __init__(self, **kw):
+            self.chat = type("C", (), {"completions": Completions()})()
+            ids = ["models/gemini-3.8-flash", "models/gemini-3.5-flash", "models/gemini-2.5-flash",
+                   "models/gemini-3.8-flash-lite", "models/text-embedding-004"]
+            self.models = type("M", (), {"list": lambda s: type("R", (), {"data": [type("D", (), {"id": i}) for i in ids]})})()
+
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setattr("openai.OpenAI", Client)
+    m = L.OpenAICompatLLM("gemini")
+    assert m.model == "gemini-2.5-flash" and set(m.skipped) == {"gemini-3.8-flash", "gemini-3.5-flash"}
+    assert L._rank_models(["gemini-3.8-flash-lite", "gemini-2.5-flash"], "gemini") == ["gemini-2.5-flash", "gemini-3.8-flash-lite"]

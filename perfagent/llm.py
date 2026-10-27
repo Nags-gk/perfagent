@@ -32,7 +32,8 @@ class QuotaExhausted(RuntimeError):
     """The provider's daily (not per-minute) quota is spent: retrying today is pointless."""
 
 
-_DAILY = re.compile(r"per ?day|PerDay|daily", re.IGNORECASE)
+# A daily quota, or a model the key gets no free quota for at all ("limit: 0"): retrying is pointless.
+_DAILY = re.compile(r"per ?day|PerDay|daily|limit: ?0\b", re.IGNORECASE)
 
 
 @dataclass
@@ -43,15 +44,26 @@ class Reply:
     raw_message: dict = field(default_factory=dict)
 
 
-def _pick_model(ids: list[str], provider: str) -> str:
+_BAD = ("image", "tts", "live", "audio", "embedding", "thinking", "exp", "preview", "vision", "guard", "whisper")
+
+
+def _rank_models(ids: list[str], provider: str) -> list[str]:
+    """Candidate chat models, best first: preferred patterns (newest first), then '-lite' variants."""
     ids = [i.split("/")[-1] for i in ids]
-    bad = ("lite", "image", "tts", "live", "audio", "embedding", "thinking", "exp", "preview", "vision", "guard")
-    clean = sorted((i for i in ids if not any(b in i for b in bad)), reverse=True)
-    for pat in PREFERRED[provider]:
-        for i in clean:
-            if re.search(pat, i):
-                return i
-    raise RuntimeError(f"no suitable {provider} model in {ids[:20]}")
+    clean = sorted((i for i in ids if not any(b in i for b in _BAD)), reverse=True)
+    out: list[str] = []
+    for lite in (False, True):
+        for pat in PREFERRED[provider]:
+            for i in clean:
+                if ("lite" in i) == lite and re.search(pat, i) and i not in out:
+                    out.append(i)
+    if not out:
+        raise RuntimeError(f"no suitable {provider} model in {ids[:20]}")
+    return out
+
+
+def _pick_model(ids: list[str], provider: str) -> str:
+    return _rank_models(ids, provider)[0]
 
 
 class OpenAICompatLLM:
@@ -64,11 +76,39 @@ class OpenAICompatLLM:
             raise RuntimeError(f"set {env} in the environment to use {provider}")
         self.client = OpenAI(api_key=key, base_url=base, max_retries=0, timeout=120)
         self.provider = provider
-        self.model = model or _pick_model([m.id for m in self.client.models.list().data], provider)
+        self.skipped: dict[str, str] = {}
+        self.model = model or self._first_working(_rank_models([m.id for m in self.client.models.list().data], provider))
         self.temperature = temperature
         self.max_retries = max_retries
         self.requests = 0
         self.retries = 0
+
+    def _first_working(self, candidates: list[str], limit: int = 6) -> str:
+        """Send each candidate a tiny request; use the first one this key can actually call.
+
+        The newest model is often overloaded (503) or has no free-tier quota (429 "limit: 0"),
+        and the model list alone does not say so.
+        """
+        from openai import APIConnectionError, APIStatusError
+
+        for m in candidates[:limit]:
+            for attempt in range(2):
+                try:
+                    self.client.chat.completions.create(model=m, max_tokens=5, temperature=0,
+                                                        messages=[{"role": "user", "content": "Reply with OK."}])
+                    if self.skipped:
+                        print(f"  model probe: skipped {self.skipped}", flush=True)
+                    print(f"  model probe: using {m}", flush=True)
+                    return m
+                except (APIStatusError, APIConnectionError) as e:
+                    msg = str(e)
+                    code = getattr(e, "status_code", 0)
+                    if code == 429 and not _DAILY.search(msg) and attempt == 0:
+                        time.sleep(15)  # per-minute limit: try this model once more
+                        continue
+                    self.skipped[m] = f"{code or 'conn'}: {msg[:160]}"
+                    break
+        raise RuntimeError(f"no {self.provider} model is callable with this key; tried {self.skipped}")
 
     @property
     def name(self) -> str:
@@ -97,7 +137,7 @@ class OpenAICompatLLM:
             time.sleep(float(m.group(1)) + 1 if m else delay)
             delay = min(delay * 2, 60)
         else:
-            raise RuntimeError(f"{self.name} kept failing: {err}")
+            raise RuntimeError(f"{self.name} kept failing: {str(err)[:400]}")
         msg = r.choices[0].message
         calls = []
         for tc in msg.tool_calls or []:

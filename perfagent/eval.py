@@ -43,6 +43,7 @@ def run_agent(kind: str, tasks, budget: int, seeds: int, model: str | None, paus
                     emit(rows[-1])
         return rows
     llm = None if kind == "scripted" else OpenAICompatLLM(kind, model)
+    dead = 0  # consecutive tasks where the provider never answered
     for i, t in enumerate(tasks):
         if done and t.id in done:
             continue
@@ -52,6 +53,11 @@ def run_agent(kind: str, tasks, budget: int, seeds: int, model: str | None, paus
         except QuotaExhausted as e:
             left = [x.id for x in tasks[i:] if not (done and x.id in done)]
             print(f"  STOP: {e}\n  {len(left)} task(s) not run; rerun later to resume.", flush=True)
+            break
+        dead = dead + 1 if (r.get("error") and r["llm_calls"] == 0) else 0
+        if dead >= 2:
+            print(f"  STOP: the provider failed on {dead} tasks in a row without answering once: {r['error']}",
+                  flush=True)
             break
         trace = r.pop("trace")
         name = _safe(f"{r['agent']}__{t.id}")

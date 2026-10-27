@@ -147,11 +147,21 @@ async function gemini(path, key, body) {
   throw new Error("Gemini API kept failing");
 }
 async function pickModel(key) {
+  // The newest model is often overloaded or has no free quota for this key, so probe in order.
   const d = await gemini("/models?pageSize=200", key);
-  const bad = ["lite", "image", "tts", "live", "audio", "embedding", "thinking", "exp", "preview", "vision"];
+  const bad = ["image", "tts", "live", "audio", "embedding", "thinking", "exp", "preview", "vision"];
   const ids = (d.models || []).filter((m) => (m.supportedGenerationMethods || []).includes("generateContent")).map((m) => m.name.replace("models/", ""))
-    .filter((n) => !bad.some((b) => n.includes(b))).sort().reverse();
-  return ids.find((n) => /^gemini-[\d.]+-flash$/.test(n)) || ids.find((n) => n.includes("flash")) || ids[0];
+    .filter((n) => n.includes("flash") && !bad.some((b) => n.includes(b))).sort().reverse();
+  const ranked = ids.filter((n) => !n.includes("lite")).concat(ids.filter((n) => n.includes("lite")));
+  const skipped = [];
+  for (const m of ranked.slice(0, 6)) {
+    $("#live-status").textContent = `Checking ${m}...`;
+    const r = await fetch(`${GEMINI}/models/${m}:generateContent`, { method: "POST", headers: { "x-goog-api-key": key, "content-type": "application/json" },
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Reply with OK." }] }], generationConfig: { maxOutputTokens: 5 } }) });
+    if (r.ok) return m;
+    skipped.push(`${m} (${r.status})`);
+  }
+  throw new Error("No Gemini model is callable with this key. Tried: " + skipped.join(", "));
 }
 async function runLive(e) {
   e.preventDefault();
