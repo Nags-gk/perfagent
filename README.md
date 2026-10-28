@@ -32,7 +32,14 @@ and reasoning, not the simulator's accuracy (InferSim's own calibration is repor
 | Optuna TPE (5 seeds) | 70% | 93.8% | n/a |
 | Random search (5 seeds) | 57% | 89.4% | n/a |
 | Rule-based strategy (reads task parameters) | 38% | 50.6% | 17/17 |
-| Gemini agent | run the `eval` workflow | | |
+| Gemini 3.6 Flash agent (partial: 4 of 25 tasks so far) | 3 of 4 found the exact optimum | | not yet run |
+
+**Status of the LLM run.** The free Gemini tier allows about 20 requests a day for this model, and a
+design-space task takes about 7 (the agent batches up to 8 tool calls per turn). The `eval` workflow
+runs daily after the quota resets and resumes where it stopped, so the table fills in over several
+days. So far the agent found the exhaustive optimum on 3 of 3 design-space tasks it finished, using
+21-30 of its 30 simulations; the 4th was cut off by the daily quota and will be retried. A
+3-of-3 sample says nothing statistical yet: treat it as a working pipeline, not a result.
 
 ## How it works
 

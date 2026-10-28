@@ -2,6 +2,10 @@ name: eval
 # Runs the LLM agent on the full task suite and publishes the results.
 # Needs a repository secret GEMINI_API_KEY (or GROQ_API_KEY for provider=groq).
 on:
+  # Daily, just after Google's free-tier quota resets (midnight Pacific). Resumes where the last run
+  # stopped and does nothing once every task is done.
+  schedule:
+    - cron: "17 8 * * *"
   workflow_dispatch:
     inputs:
       provider:
@@ -35,10 +39,10 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          PROVIDER: ${{ inputs.provider }}
+          PROVIDER: ${{ inputs.provider || 'gemini' }}
           MODEL: ${{ inputs.model }}
           ONLY: ${{ inputs.only }}
-          PAUSE: ${{ inputs.pause }}
+          PAUSE: ${{ inputs.pause || '6' }}
         run: |
           args=(--agents "$PROVIDER" --pause "$PAUSE" --max-turns 25)
           [ -n "$MODEL" ] && args+=(--model "$MODEL")
@@ -50,7 +54,7 @@ jobs:
           git config user.name "perfagent-eval"
           git config user.email "actions@users.noreply.github.com"
           git add site/data/results.json site/data/traces
-          git diff --cached --quiet || git commit -m "eval: ${{ inputs.provider }} results" && git push
+          git diff --cached --quiet || git commit -m "eval: ${{ inputs.provider || 'gemini' }} results" && git push
       - if: always()
         run: python scripts/build_site.py
       - if: always()

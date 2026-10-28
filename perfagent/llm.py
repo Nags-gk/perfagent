@@ -124,7 +124,9 @@ class OpenAICompatLLM:
                 r = self.client.chat.completions.create(model=self.model, messages=messages, tools=tools,
                                                         temperature=self.temperature)
                 break
-            except (RateLimitError, APIConnectionError) as e:
+            except RateLimitError as e:
+                err = RuntimeError(f"{e} {e.body}")  # the body says whether the limit is per minute or per day
+            except APIConnectionError as e:
                 err = e
             except APIStatusError as e:
                 if e.status_code not in (429, 500, 502, 503, 504):

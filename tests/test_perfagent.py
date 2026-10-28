@@ -251,3 +251,25 @@ def test_gemini_thought_signature_is_echoed_back():
     r = o.chat([], [])
     assert r.raw_message["tool_calls"][0]["extra_content"]["google"]["thought_signature"] == "SIG"
     assert r.tool_calls == [{"id": "c1", "name": "check_fit", "args": {"model": "llama-3.1-8b", "hw": "h100"}}]
+
+
+def test_rate_limit_body_detects_daily_quota(monkeypatch):
+    import httpx
+    from openai import RateLimitError
+
+    from perfagent.llm import OpenAICompatLLM, QuotaExhausted
+
+    body = [{"error": {"code": 429, "message": "Quota exceeded for metric: generate_content_free_tier_requests, "
+                                           "limit: 20", "details": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}}]
+
+    class C:
+        def create(self, **kw):
+            req = httpx.Request("POST", "https://x")
+            raise RateLimitError("Error code: 429", response=httpx.Response(429, request=req), body=body)
+
+    o = OpenAICompatLLM.__new__(OpenAICompatLLM)
+    o.client = type("X", (), {"chat": type("Y", (), {"completions": C()})()})()
+    o.model, o.provider, o.temperature, o.max_retries, o.requests, o.retries = "m", "gemini", 0, 3, 0, 0
+    with pytest.raises(QuotaExhausted):
+        o.chat([], [])
+    assert o.requests == 1  # no pointless retries

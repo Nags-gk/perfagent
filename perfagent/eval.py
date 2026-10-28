@@ -128,6 +128,9 @@ def main(argv=None) -> None:
         else:  # resume: skip tasks this provider already completed without a provider error
             done = {r["task"] for r in rows if r["agent"].startswith(kind + ":") and not r.get("error")}
             rows = [r for r in rows if not (r["agent"].startswith(kind + ":") and r.get("error"))]
+            if {t.id for t in tasks} <= done:
+                print(f"  all {len(tasks)} tasks already done for {kind}; nothing to run", flush=True)
+                continue
 
         def save(r, rows=rows):
             rows.append(r)
